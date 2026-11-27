@@ -21,7 +21,7 @@ If a phone has no motion sensor (or permission was denied), drag on the screen t
 
 ## Running it
 
-Motion sensors only work over HTTPS. To play on a phone, turn on GitHub Pages: **Settings → Pages → Deploy from a branch → `main` / root**. The game then runs at `https://geekvikas.github.io/test/`.
+Motion sensors only work over HTTPS. To play on a phone, turn on GitHub Pages: **Settings → Pages → Deploy from a branch → `main` / root**. The game then runs at `https://geekvikas.github.io/throttle_brawl/`.
 
 On iPhone, tap START and allow "Motion & Orientation Access" when Safari asks.
 
