@@ -49,6 +49,11 @@
   .opts label{display:flex;align-items:center;gap:6px;cursor:pointer}
   .opts input{width:18px;height:18px;accent-color:#ff5f6d}
   .hint{font-size:12px;opacity:.7;margin:10px 0 0;line-height:1.4}
+  .big:focus-visible{outline:4px solid #ffe36e;outline-offset:4px}
+  .opts input:focus-visible,.namerow input:focus-visible{outline:3px solid #ffe36e;outline-offset:2px}
+  .namerow{display:flex;align-items:center;justify-content:center;gap:8px;margin:0 0 10px;font-size:14px;font-weight:700}
+  .namerow input{font:inherit;font-size:16px;font-weight:800;width:10em;padding:7px 12px;border-radius:20px;border:2px solid rgba(255,255,255,.5);
+    background:rgba(0,0,0,.35);color:#ffe36e;text-align:center;-webkit-user-select:text;user-select:text}
   .stats{font-size:17px;line-height:1.7;margin:4px 0 12px}
   .stats b{color:#ffe36e}
 </style>
@@ -71,13 +76,15 @@
       <li>💥 <b>Shake</b> to jump barrels and cars</li>
       <li>🦵 <b>Left button</b> kicks, 👊 <b>right button</b> punches</li>
     </ul>
+    <div class="namerow"><label for="optName">Racer</label><input id="optName" type="text" maxlength="12" autocomplete="off" autocapitalize="words" spellcheck="false" value="Kelly"></div>
     <div><button id="startBtn" class="big">START RACE</button></div>
     <div class="opts">
       <label><input type="checkbox" id="optInvert"> Invert gas/brake tilt</label>
       <label><input type="checkbox" id="optSound" checked> Sound</label>
     </div>
     <p class="hint">Hold the phone in landscape like handlebars. The angle you hold it at during the countdown becomes "cruise".<br>
-      Desktop: ← → steer, ↑ gas, ↓ brake, Space jump, Z kick, X punch.</p>
+      Keyboard: ← → steer, ↑ gas (stays on), ↓ ease off / hold to brake, Space jump, Z kick, X punch, P pause.<br>
+      Fire TV remote: ◀ ▶ steer, ▲ gas, ▼ ease off / hold to brake, Select jump, ⏪ kick, ⏩ punch, ⏯ pause.</p>
   </div>
 </div>
 
@@ -95,6 +102,7 @@
 <div id="finish" class="screen hidden">
   <div class="card">
     <h2 id="finPlace">1ST PLACE</h2>
+    <p id="finName" class="tag"></p>
     <div id="finStats" class="stats"></div>
     <div><button id="againBtn" class="big">RACE AGAIN</button></div>
     <div><button id="menuBtn" class="big alt">MENU</button></div>
@@ -401,6 +409,8 @@ let pitchSamples = [];
 let sensorHintT = 0;
 let invertTilt = store.get('tb_invert', false);
 let soundOn = store.get('tb_sound', true);
+const cleanName = v => (String(v || '').replace(/\s+/g, ' ').trim().slice(0, 12)) || 'Kelly';
+let racerName = cleanName(store.get('tb_name', 'Kelly'));
 
 const RIDER_NAMES = ['Rex', 'Mara', 'Blaze', 'Tank', 'Zed', 'Juno', 'Cobra', 'Slick', 'Nova'];
 const JACKETS = ['#e63946', '#2a9d8f', '#f4a261', '#8e44ad', '#ff006e', '#06d6a0', '#adb5bd', '#ffbe0b', '#7b4b2a'];
@@ -498,30 +508,93 @@ function pitchToThrottle() {
   if (e < 6) return NEUTRAL_T * (1 - e / 6);
   return -Math.min(1, (e - 6) / 12);
 }
+// Keyboard / TV remote. Gas is sticky (TV remotes often repeat a held button as quick press-release pairs,
+// so "hold to accelerate" doesn't work there). Down eases off gas, and braking lasts while Down keeps arriving.
+const keyLatch = { left: 0, right: 0 };
+let kbThr = null, brakeUntil = 0, usingKeys = false;
 function updateInput(dt) {
   let s = 0, t = NEUTRAL_T;
+  const tn = nowMs();
+  const L = keys.left || tn - keyLatch.left < 140, R = keys.right || tn - keyLatch.right < 140;
+  if (kbThr === 'brake' && !keys.down && tn > brakeUntil) kbThr = 'cruise';
   if (touchDrag) { s = clamp(touchDrag.dx / 70, -1, 1); t = clamp(NEUTRAL_T - touchDrag.dy / 90, -1, 1); }
-  else if (keys.left || keys.right || keys.up || keys.down) { s = (keys.right ? 1 : 0) - (keys.left ? 1 : 0); t = keys.up ? 1 : keys.down ? -1 : NEUTRAL_T; }
-  else if (tilt.has) {
-    const sd = tilt.steerDeg, dead = 2.5;
-    s = Math.abs(sd) < dead ? 0 : clamp((Math.abs(sd) - dead) / (STEER_FULL - dead), 0, 1) * Math.sign(sd);
-    t = pitchToThrottle();
+  else {
+    if (L || R) s = (R ? 1 : 0) - (L ? 1 : 0);
+    else if (tilt.has) {
+      const sd = tilt.steerDeg, dead = 2.5;
+      s = Math.abs(sd) < dead ? 0 : clamp((Math.abs(sd) - dead) / (STEER_FULL - dead), 0, 1) * Math.sign(sd);
+    }
+    if (kbThr) t = kbThr === 'gas' ? 1 : kbThr === 'brake' ? -1 : NEUTRAL_T;
+    else if (tilt.has) t = pitchToThrottle();
   }
   input.steer = lerp(input.steer, s, Math.min(1, dt * 14));
   input.throttle = lerp(input.throttle, t, Math.min(1, dt * 10));
 }
 function recenter() { if (tilt.has) neutralPitch = tilt.pitch; showMsg('TILT RECENTERED', 1, '#9ad0ff'); }
 
-const KEYMAP = { ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right', ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down' };
+function keyAction(e) {
+  const k = e.key || '', c = e.keyCode || e.which || 0, code = e.code || '', l = k.length === 1 ? k.toLowerCase() : '';
+  if (k === 'ArrowLeft' || k === 'Left' || c === 37) return 'left';
+  if (k === 'ArrowRight' || k === 'Right' || c === 39) return 'right';
+  if (k === 'ArrowUp' || k === 'Up' || c === 38) return 'up';
+  if (k === 'ArrowDown' || k === 'Down' || c === 40) return 'down';
+  if (k === 'Enter' || c === 13 || c === 23) return 'select';
+  if (k === 'MediaPlayPause' || k === 'MediaPlay' || k === 'MediaPause' || c === 179 || k === 'Escape' || c === 27) return 'pause';
+  if (k === 'MediaRewind' || k === 'MediaTrackPrevious' || c === 227) return 'kick';
+  if (k === 'MediaFastForward' || k === 'MediaTrackNext' || c === 228) return 'punch';
+  // letter keys: skip while typing in a text field
+  const t = e.target;
+  if (t && t.tagName === 'INPUT' && t.type === 'text') return null;
+  if (k === ' ' || k === 'Spacebar' || code === 'Space') return 'jump';
+  if (code === 'KeyA' || l === 'a') return 'left';
+  if (code === 'KeyD' || l === 'd') return 'right';
+  if (code === 'KeyW' || l === 'w') return 'up';
+  if (code === 'KeyS' || l === 's') return 'down';
+  if (code === 'KeyZ' || code === 'KeyJ' || l === 'z' || l === 'j') return 'kick';
+  if (code === 'KeyX' || code === 'KeyK' || l === 'x' || l === 'k') return 'punch';
+  if (code === 'KeyP' || l === 'p') return 'pause';
+  return null;
+}
+function menuKey(a, e) {
+  const scr = state === 'title' ? $('title') : state === 'paused' ? $('pause') : $('finish');
+  const items = Array.prototype.filter.call(scr.querySelectorAll('button, input'), el => el.offsetParent !== null);
+  if (!items.length) return;
+  const ae = document.activeElement, cur = items.indexOf(ae), typing = ae && ae.tagName === 'INPUT' && ae.type === 'text';
+  if (a === 'up' || a === 'down' || ((a === 'left' || a === 'right') && !typing)) {
+    e.preventDefault();
+    const dir = (a === 'up' || a === 'left') ? -1 : 1;
+    items[cur < 0 ? (dir > 0 ? 0 : items.length - 1) : (cur + dir + items.length) % items.length].focus();
+  } else if (a === 'select') {
+    if (cur < 0 || typing) { e.preventDefault(); if (typing) ae.blur(); (scr.querySelector('.big') || items[0]).click(); }
+    else if (ae.tagName === 'INPUT') { e.preventDefault(); ae.click(); }
+    // a focused button handles Enter natively
+  } else if (a === 'pause') {
+    e.preventDefault();
+    if (state === 'paused') resume(); else (scr.querySelector('.big') || items[0]).click();
+  }
+}
 window.addEventListener('keydown', e => {
-  if (KEYMAP[e.code]) { keys[KEYMAP[e.code]] = true; e.preventDefault(); }
-  else if (e.code === 'Space') { jump(); e.preventDefault(); }
-  else if (e.code === 'KeyZ' || e.code === 'KeyJ') { playerAttack('kick'); flashBtn('kickBtn'); }
-  else if (e.code === 'KeyX' || e.code === 'KeyK') { playerAttack('punch'); flashBtn('punchBtn'); }
-  else if (e.code === 'KeyP' || e.code === 'Escape') { if (state === 'paused') resume(); else pause(); }
-  else if (e.code === 'Enter' && state === 'title') $('startBtn').click();
+  const a = keyAction(e); if (!a) return;
+  usingKeys = true;
+  if (state === 'title' || state === 'paused' || (state === 'finished' && finishShown)) { menuKey(a, e); return; }
+  e.preventDefault();
+  switch (a) {
+    case 'left': case 'right': keys[a] = true; keyLatch[a] = nowMs(); break;
+    case 'up': kbThr = (kbThr === 'brake' && !e.repeat) ? 'cruise' : 'gas'; keys.up = true; break;
+    case 'down':
+      if (kbThr === 'gas' && !e.repeat) kbThr = 'cruise';
+      else { kbThr = 'brake'; brakeUntil = nowMs() + 600; }
+      keys.down = true; break;
+    case 'select': case 'jump': jump(); break;
+    case 'kick': playerAttack('kick'); flashBtn('kickBtn'); break;
+    case 'punch': playerAttack('punch'); flashBtn('punchBtn'); break;
+    case 'pause': pause(); break;
+  }
 });
-window.addEventListener('keyup', e => { if (KEYMAP[e.code]) keys[KEYMAP[e.code]] = false; });
+window.addEventListener('keyup', e => {
+  const a = keyAction(e);
+  if (a === 'left' || a === 'right' || a === 'up' || a === 'down') keys[a] = false;
+});
 
 // drag-to-steer + tap-to-jump fallback when no motion sensor
 cv.addEventListener('pointerdown', e => {
@@ -1129,6 +1202,12 @@ function drawPlayer() {
   const lean = crashed ? 0 : clamp(input.steer * 0.28 * Math.min(1, sp * 2) - segAt(position + PLAYER_Z).curve * 0.02 * sp, -0.4, 0.4);
   const spin = crashed ? crashSide * Math.min(crashT, 0.9) / 0.9 * Math.PI * 2.5 : 0;
   drawRider(W / 2, playerGround() + bump, s, Object.assign({}, PLAYER_LOOK, { lean, air, spin, atk: pAtk, wheel, flash: hurtT > 0.2 ? 1 : 0, alpha: blink ? 0.45 : 1 }));
+  if (state !== 'title' && !crashed) {
+    const ty = playerGround() + bump - air - 1.62 * s;
+    ctx.font = '900 13px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.75)'; ctx.strokeText(racerName, W / 2, ty);
+    ctx.fillStyle = '#ffd23f'; ctx.fillText(racerName, W / 2, ty);
+  }
 }
 
 function txt(s, x, y, size, align, color, base) {
@@ -1193,25 +1272,31 @@ function startRace() {
   resetRace();
   ['title', 'finish', 'pause'].forEach(id => $(id).classList.add('hidden'));
   state = 'countdown'; countdownT = 3.2; lastCount = 0;
+  kbThr = null; keys.left = keys.right = keys.up = keys.down = false;
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   setButtons(true);
 }
 function pause() {
   if (state !== 'race' && state !== 'countdown') return;
   pausedFrom = state; state = 'paused';
   $('pause').classList.remove('hidden'); setButtons(false);
+  if (usingKeys) $('resumeBtn').focus();
   if (eng) eng.g.gain.setTargetAtTime(0, AC.currentTime, 0.05);
 }
 function resume() {
   if (state !== 'paused') return;
   state = pausedFrom; $('pause').classList.add('hidden'); setButtons(true);
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   initAudio(); last = nowMs();
 }
 function showFinish() {
   finishShown = true;
   $('finPlace').textContent = ordinal(place) + ' PLACE';
+  $('finName').textContent = place === 1 ? racerName + ' wins the race!' : racerName + ' finished ' + ordinal(place).toLowerCase() + ' of ' + (riders.length + 1);
   const best = store.get('tb_best', 0);
   $('finStats').innerHTML = 'Time <b>' + fmtTime(raceTime) + '</b><br>Knockouts <b>' + kos + '</b> · Crashes <b>' + crashes + '</b>' + (best ? '<br>Best time <b>' + fmtTime(best) + '</b>' : '');
   $('finish').classList.remove('hidden');
+  if (usingKeys) $('againBtn').focus();
 }
 $('startBtn').addEventListener('click', () => {
   initAudio();
@@ -1224,7 +1309,10 @@ $('resumeBtn').addEventListener('click', resume);
 $('recenterBtn').addEventListener('click', () => { recenter(); resume(); });
 $('restartBtn').addEventListener('click', () => { initAudio(); startRace(); });
 $('againBtn').addEventListener('click', () => { initAudio(); startRace(); });
-$('menuBtn').addEventListener('click', () => { $('finish').classList.add('hidden'); $('title').classList.remove('hidden'); state = 'title'; resetRace(); setButtons(false); });
+$('menuBtn').addEventListener('click', () => { $('finish').classList.add('hidden'); $('title').classList.remove('hidden'); state = 'title'; resetRace(); setButtons(false); if (usingKeys) $('startBtn').focus(); });
+$('optName').value = racerName;
+$('optName').addEventListener('input', e => { racerName = cleanName(e.target.value); store.set('tb_name', racerName); });
+$('optName').addEventListener('blur', e => { e.target.value = racerName; });
 $('pauseBtn').addEventListener('pointerdown', e => { e.preventDefault(); pause(); });
 const syncInvert = v => { invertTilt = v; store.set('tb_invert', v); $('optInvert').checked = v; $('optInvert2').checked = v; };
 $('optInvert').addEventListener('change', e => syncInvert(e.target.checked));
@@ -1267,7 +1355,7 @@ function frame(t) {
 requestAnimationFrame(frame);
 
 // test hook (harmless in production)
-window.__tb = { get audio() { return AC ? AC.state : 'none'; }, get state() { return state; }, get speed() { return speed; }, get pos() { return position; }, riders: () => riders, set: (k, v) => { if (k === 'position') position = v; if (k === 'speed') speed = v; if (k === 'x') playerX = v; }, get finishZ() { return FINISH_Z; }, onOrient, jump, playerAttack, keys };
+window.__tb = { get atk() { return pAtk ? pAtk.type : null; }, get thr() { return kbThr; }, get audio() { return AC ? AC.state : 'none'; }, get state() { return state; }, get speed() { return speed; }, get pos() { return position; }, riders: () => riders, set: (k, v) => { if (k === 'position') position = v; if (k === 'speed') speed = v; if (k === 'x') playerX = v; }, get finishZ() { return FINISH_Z; }, onOrient, jump, playerAttack, keys };
 })();
 </script>
 </body>

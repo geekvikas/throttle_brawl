@@ -13,9 +13,16 @@ Everything is in one file (`index.html`): no build step and no dependencies. The
 - The left button kicks and the right button punches. Both hit whichever rider is beside you. A kick has more reach and does more damage, and a punch is faster.
 - Use Pause → Recenter tilt if the controls feel off.
 
-**Desktop**
-- ← → steer, ↑ gas, ↓ brake
+**Keyboard**
+- ← → steer. ↑ turns the gas on, and it stays on. ↓ eases back to cruise, and holding ↓ brakes.
 - Space jumps, Z kicks, X punches, P pauses
+
+**Fire TV remote / TV remotes**
+- ◀ ▶ steer, ▲ gas (stays on), ▼ eases off, and holding ▼ brakes
+- Select jumps, ⏪ Rewind kicks, ⏩ Fast Forward punches, ⏯ Play/Pause pauses
+- In menus, the D-pad moves between buttons and Select presses them
+
+The racer name defaults to **Kelly**. You can change it on the title screen, and it's remembered on that device.
 
 If a phone has no motion sensor (or permission was denied), drag on the screen to steer and throttle, and tap to jump.
 
